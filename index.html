@@ -32,6 +32,7 @@
 
 <nav class="abas" id="abas">
   <button class="aba ativa" data-aba="radar">Radar</button>
+  <button class="aba" data-aba="buffett">Crivo Buffett</button>
   <button class="aba" data-aba="analise">Análise</button>
   <button class="aba" data-aba="carteira">Carteira</button>
   <button class="aba" data-aba="prompts">Prompts de IA</button>
@@ -52,12 +53,8 @@
     <label class="campo"><span>Setor</span>
       <select id="fSetor"><option value="">todos</option></select>
     </label>
-    <label class="campo"><span>País</span>
-      <select id="fPais">
-        <option value="">todos</option>
-        <option value="BR">Brasil</option>
-        <option value="US">EUA</option>
-      </select>
+    <label class="campo"><span>Região</span>
+      <select id="fRegiao"><option value="">todas</option></select>
     </label>
     <label class="campo"><span>Score mínimo <b id="vScore">0</b></span>
       <input type="range" id="fScore" min="0" max="90" value="0" step="5">
@@ -95,6 +92,7 @@
           <th data-sort="roe" class="n">ROE</th>
           <th data-sort="cresc" class="n">Cresc. est.</th>
           <th data-sort="score" class="n">Score</th>
+          <th data-sort="buffett" class="n">Buffett</th>
           <th>Veredito</th>
           <th></th>
         </tr>
@@ -102,6 +100,42 @@
       <tbody id="corpoTabela"></tbody>
     </table>
     <p class="vazio" id="vazio" hidden>Nenhuma ação passou nos filtros. Afrouxe algum critério.</p>
+  </div>
+</section>
+
+
+<!-- ================= CRIVO BUFFETT ================= -->
+<section class="painel" id="painel-buffett">
+  <div id="buffettIntro"></div>
+  <div class="filtros">
+    <label class="campo"><span>Região</span><select id="bRegiao"><option value="">todas</option></select></label>
+    <label class="campo"><span>Selo</span><select id="bSelo"><option value="">todos</option></select></label>
+    <label class="campo"><span>Fosso mínimo</span>
+      <select id="bMoat">
+        <option value="0">qualquer</option>
+        <option value="1">estreito ou melhor</option>
+        <option value="2">sólido ou melhor</option>
+        <option value="3">apenas fosso largo</option>
+      </select></label>
+    <label class="campo"><span>Tenets aprovados (mín.) <b id="vTenets">0</b>/12</span>
+      <input type="range" id="bTenets" min="0" max="12" value="0" step="1"></label>
+    <label class="campo"><span>Margem de segurança mínima <b id="vMargemB">-100</b>%</span>
+      <input type="range" id="bMargem" min="-100" max="70" value="-100" step="5"></label>
+    <label class="campo check"><input type="checkbox" id="bCirculo"> <span>Só dentro do meu círculo</span></label>
+  </div>
+  <div class="tabela-wrap">
+    <table class="tabela" id="tabelaBuffett">
+      <thead><tr>
+        <th data-sortb="ticker">Ativo</th><th data-sortb="regiao">Região</th><th data-sortb="moat">Fosso</th>
+        <th data-sortb="tenets" class="n">Tenets</th><th data-sortb="roic" class="n">ROIC</th>
+        <th data-sortb="oe" class="n">Lucro do dono</th><th data-sortb="juro" class="n">Juro local</th>
+        <th data-sortb="k" class="n">Custo capital</th><th data-sortb="intr" class="n">Valor intrínseco</th>
+        <th data-sortb="margem" class="n">Margem seg.</th><th data-sortb="compra" class="n">Comprar até</th>
+        <th>Selo</th><th></th>
+      </tr></thead>
+      <tbody id="corpoBuffett"></tbody>
+    </table>
+    <p class="vazio" id="vazioBuffett" hidden>Nenhuma empresa passou nesses critérios. É assim que deve ser: o crivo de Buffett reprova quase tudo.</p>
   </div>
 </section>
 
@@ -171,6 +205,40 @@
   </div>
 
   <div class="cartao">
+    <h2>Crivo Buffett — premissas</h2>
+    <p class="ajuda">Buffett desconta o lucro do proprietário pelo juro do título longo do governo local mais um prêmio.
+      O piso existe para que juro nominal baixo não transforme qualquer empresa em barganha.</p>
+    <div class="grade-config">
+      <label class="campo"><span>Prêmio sobre o juro longo (%) <b id="vPremio">3.5</b></span>
+        <input type="range" id="pPremio" min="0" max="8" step="0.5" value="3.5"></label>
+      <label class="campo"><span>Piso da taxa de desconto (%) <b id="vPiso">9</b></span>
+        <input type="range" id="pPiso" min="5" max="15" step="0.5" value="9"></label>
+      <label class="campo"><span>Margem de segurança exigida (%) <b id="vMargemBuf">30</b></span>
+        <input type="range" id="pMargemBuf" min="0" max="60" step="5" value="30"></label>
+      <label class="campo"><span>Moeda base da carteira</span>
+        <select id="moedaBase"><option value="BRL">Real (R$)</option><option value="USD">Dólar (US$)</option></select></label>
+    </div>
+  </div>
+
+  <div class="cartao">
+    <h2>Círculo de competência</h2>
+    <p class="ajuda">Munger não investe no que não entende. Marque os setores que você realmente acompanha —
+      o app passa a avisar quando uma ação estiver fora deles. Sem nada marcado, nenhum aviso aparece.</p>
+    <div class="circulo" id="circulo"></div>
+  </div>
+
+  <div class="cartao">
+    <h2>Câmbio e juro longo por região</h2>
+    <p class="ajuda">Câmbio converte a carteira para a moeda base. O juro longo é a taxa livre de risco usada no
+      desconto — atualize quando o cenário mudar.</p>
+    <textarea id="editorParams" spellcheck="false" style="min-height:150px"></textarea>
+    <div class="linha-topo">
+      <button class="btn" id="btnSalvarParams">Salvar parâmetros</button>
+      <span id="statusParams" class="status"></span>
+    </div>
+  </div>
+
+  <div class="cartao">
     <h2>Preços em tempo real (opcional)</h2>
     <p class="ajuda">A base local traz preços de exemplo. Para puxar a cotação atual, cole um token gratuito da
       <a href="https://brapi.dev" target="_blank" rel="noopener">brapi.dev</a> (ações da B3). O token fica salvo só no seu navegador.</p>
@@ -204,7 +272,9 @@
 </footer>
 
 <script src="js/data.js"></script>
+<script src="js/data-global.js"></script>
 <script src="js/engine.js"></script>
+<script src="js/buffett.js"></script>
 <script src="js/prompts.js"></script>
 <script src="js/app.js"></script>
 </body>

@@ -121,7 +121,7 @@ textarea{min-height:220px;font-family:ui-monospace,Consolas,monospace;font-size:
 
 .score-bola{
   display:inline-flex;align-items:center;justify-content:center;
-  width:38px;height:26px;border-radius:6px;font-weight:700;font-size:.82rem
+  min-width:38px;padding:0 7px;height:26px;border-radius:6px;font-weight:700;font-size:.82rem
 }
 .s-alto{background:#123d2c;color:#3ee89f}
 .s-medio{background:#0f3352;color:#63b8ff}
@@ -210,3 +210,46 @@ textarea{min-height:220px;font-family:ui-monospace,Consolas,monospace;font-size:
 }
 .rodape p{max-width:820px;margin:0 auto 8px}
 .creditos{font-size:.76rem;opacity:.75}
+
+/* ===== crivo Buffett ===== */
+.tenets{display:grid;gap:14px}
+.tenet-grupo h4{
+  margin:0 0 8px;color:var(--txt2);font-size:.75rem;text-transform:uppercase;letter-spacing:.06em
+}
+.tenet{
+  display:grid;grid-template-columns:26px 1fr;gap:10px;align-items:start;
+  padding:9px 0;border-bottom:1px solid #1b2735
+}
+.tenet:last-child{border-bottom:none}
+.tenet .marca-ok{
+  width:22px;height:22px;border-radius:6px;display:flex;align-items:center;justify-content:center;
+  font-size:.8rem;font-weight:700
+}
+.ok-sim{background:#123d2c;color:#3ee89f}
+.ok-quase{background:#3a3320;color:#f2c14e}
+.ok-nao{background:#3d1c22;color:#ff8189}
+.tenet .nome{font-weight:600;font-size:.9rem}
+.tenet .detalhe{color:var(--txt2);font-size:.83rem;margin-top:2px}
+
+.selo{
+  display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:999px;
+  font-size:.8rem;font-weight:700
+}
+.aviso-circulo{
+  background:#3a2f1e;border:1px solid #5a4a27;color:var(--amarelo);
+  border-radius:9px;padding:10px 14px;font-size:.85rem;margin-bottom:12px
+}
+.circulo{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}
+.circulo label{
+  display:flex;align-items:center;gap:8px;background:var(--bg2);border:1px solid var(--linha);
+  border-radius:8px;padding:8px 10px;font-size:.85rem;cursor:pointer
+}
+.circulo label:hover{border-color:var(--azul)}
+.circulo input{width:auto}
+.moat-chip{
+  display:inline-block;background:var(--card2);color:var(--roxo);border-radius:6px;
+  padding:2px 8px;font-size:.72rem;margin:2px 3px 0 0
+}
+.fonte-lista{list-style:none;padding:0;margin:8px 0 0;font-size:.83rem}
+.fonte-lista li{padding:3px 0}
+.moeda-tag{color:var(--txt2);font-size:.72rem;border:1px solid var(--linha);border-radius:5px;padding:1px 5px;margin-left:6px}

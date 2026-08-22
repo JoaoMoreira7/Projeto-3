@@ -2,17 +2,47 @@
    APP — liga a base de dados, o motor de análise e a interface
    ============================================================ */
 
-const LS = { dados: "ar_dados", carteira: "ar_carteira", premissas: "ar_premissas", token: "ar_token" };
+const LS = {
+  dados: "ar_dados", carteira: "ar_carteira", premissas: "ar_premissas", token: "ar_token",
+  premissasB: "ar_premissas_buffett", circulo: "ar_circulo", params: "ar_params", moedaBase: "ar_moeda_base"
+};
+
+// universo completo: Brasil + resto do mundo, com região sempre preenchida
+const UNIVERSO = [...ACOES, ...ACOES_GLOBAIS].map((a) => ({
+  ...a, regiao: a.regiao || REGIAO_POR_PAIS[a.pais] || a.pais
+}));
+
+const PARAMS_PADRAO = { FX: { ...FX }, juros: { ...TAXA_LIVRE_RISCO } };
 
 const estado = {
-  dados: carregar(LS.dados) || ACOES.map((a) => ({ ...a })),
+  dados: carregar(LS.dados) || UNIVERSO.map((a) => ({ ...a })),
   carteira: carregar(LS.carteira) || [],
   premissas: { ...PREMISSAS_PADRAO, ...(carregar(LS.premissas) || {}) },
+  premissasB: { ...PREMISSAS_BUFFETT, ...(carregar(LS.premissasB) || {}) },
+  circulo: carregar(LS.circulo) || [],
+  params: carregar(LS.params) || JSON.parse(JSON.stringify(PARAMS_PADRAO)),
+  moedaBase: carregar(LS.moedaBase) || "BRL",
   analisadas: [],
   ordem: { campo: "score", desc: true },
+  ordemB: { campo: "tenets", desc: true },
   selecionado: null,
   origemPrecos: "local"
 };
+
+/* ---------- câmbio ---------- */
+function aplicarParams() {
+  Object.assign(FX, estado.params.FX || {});
+  Object.assign(TAXA_LIVRE_RISCO, estado.params.juros || {});
+}
+const simboloBase = () => (estado.moedaBase === "BRL" ? "R$" : "US$");
+function fxParaBRL(simbolo) {
+  return FX[MOEDA_CODIGO[simbolo] || "BRL"] ?? 1;
+}
+// converte um valor na moeda do ativo para a moeda base da carteira
+function paraBase(valor, simbolo) {
+  const emReais = valor * fxParaBRL(simbolo);
+  return estado.moedaBase === "BRL" ? emReais : emReais / (FX.USD || 5.4);
+}
 
 function carregar(chave) {
   try { return JSON.parse(localStorage.getItem(chave)); } catch (e) { return null; }
@@ -31,8 +61,12 @@ const el = (id) => document.getElementById(id);
 
 /* ---------- recalcular tudo ---------- */
 function recalcular() {
+  aplicarParams();
   estado.analisadas = analisarTodos(estado.dados, estado.premissas);
+  const buffs = analisarBuffettTodos(estado.analisadas, estado.premissasB, estado.circulo);
+  estado.analisadas.forEach((a, i) => { a.buff = buffs[i]; });
   renderResumo();
+  renderBuffett();
   renderTabela();
   preencherSelects();
   renderDetalhe();
@@ -43,7 +77,7 @@ function recalcular() {
 function filtrar() {
   const busca = el("fBusca").value.trim().toLowerCase();
   const setor = el("fSetor").value;
-  const pais = el("fPais").value;
+  const regiao = el("fRegiao").value;
   const minScore = +el("fScore").value;
   const minUpside = +el("fUpside").value;
   const maxPL = +el("fPL").value;
@@ -54,7 +88,7 @@ function filtrar() {
   return estado.analisadas.filter((a) => {
     if (busca && !(a.ticker.toLowerCase().includes(busca) || a.nome.toLowerCase().includes(busca))) return false;
     if (setor && a.setor !== setor) return false;
-    if (pais && a.pais !== pais) return false;
+    if (regiao && a.regiao !== regiao) return false;
     if (a.score < minScore) return false;
     if ((a.val.upside ?? -999) < minUpside) return false;
     if (soLucro && (a.ind.pl == null || a.ind.pl <= 0)) return false;
@@ -71,7 +105,8 @@ function ordenar(lista) {
     ticker: (a) => a.ticker, setor: (a) => a.setor, preco: (a) => a.preco,
     justo: (a) => a.val.justo ?? -1, upside: (a) => a.val.upside ?? -999,
     pl: (a) => a.ind.pl ?? 999, pvp: (a) => a.ind.pvp ?? 999, dy: (a) => a.ind.dy,
-    roe: (a) => a.roe, cresc: (a) => a.crescEst, score: (a) => a.score
+    roe: (a) => a.roe, cresc: (a) => a.crescEst, score: (a) => a.score,
+    buffett: (a) => a.buff.aprovados + a.buff.score / 1000
   }[campo] || ((a) => a.score);
 
   return lista.slice().sort((x, y) => {
@@ -79,6 +114,10 @@ function ordenar(lista) {
     const cmp = typeof vx === "string" ? vx.localeCompare(vy) : vx - vy;
     return desc ? -cmp : cmp;
   });
+}
+
+function classeTenets(n) {
+  return n >= 10 ? "s-alto" : n >= 7 ? "s-medio" : n >= 5 ? "s-baixo" : "s-min";
 }
 
 function classeScore(s) {
@@ -92,7 +131,7 @@ function renderTabela() {
 
   corpo.innerHTML = lista.map((a) => `
     <tr data-ticker="${a.ticker}">
-      <td><div class="tk">${a.ticker}</div><div class="nm">${a.nome}</div></td>
+      <td><div class="tk">${a.ticker}<span class="moeda-tag">${a.regiao}</span></div><div class="nm">${a.nome}</div></td>
       <td class="nm">${a.setor}</td>
       <td class="n">${money(a.preco, a.moeda)}</td>
       <td class="n">${money(a.val.justo, a.moeda)}</td>
@@ -103,6 +142,7 @@ function renderTabela() {
       <td class="n">${pct(a.roe)}</td>
       <td class="n">${pct(a.crescEst, 0)}</td>
       <td class="n"><span class="score-bola ${classeScore(a.score)}">${a.score.toFixed(0)}</span></td>
+      <td class="n"><span class="score-bola ${classeTenets(a.buff.aprovados)}">${a.buff.aprovados}/12</span></td>
       <td><span class="pill ${a.classe.classe}">${a.classe.rotulo}</span></td>
       <td><button class="btn-mini" data-abrir="${a.ticker}">ver</button></td>
     </tr>`).join("");
@@ -126,8 +166,9 @@ function renderResumo() {
       <div class="obs">score ≥ 60 e desconto relevante</div></div>
     <div class="kpi"><div class="rot">Upside médio delas</div><div class="val">${pct(mediaUpside, 0)}</div>
       <div class="obs">até o preço justo calculado</div></div>
-    <div class="kpi"><div class="rot">Negociando abaixo de 10x lucro</div><div class="val">${baratas}</div>
-      <div class="obs">P/L menor que 10</div></div>
+    <div class="kpi"><div class="rot">Aprovadas no crivo Buffett</div>
+      <div class="val" style="color:var(--roxo)">${lista.filter((a) => a.buff.aprovados >= 10).length}</div>
+      <div class="obs">10 ou mais dos 12 tenets · ${[...new Set(lista.map((a) => a.regiao))].length} regiões na base</div></div>
     <div class="kpi"><div class="rot">Destaque do momento</div><div class="val" style="color:var(--azul)">${top ? top.ticker : "—"}</div>
       <div class="obs">${top ? `score ${top.score.toFixed(0)} · upside ${pct(top.val.upside, 0)}` : ""}</div></div>`;
 }
@@ -186,6 +227,8 @@ function renderDetalhe() {
           <div class="obs">-15% ou mínima de 52s</div></div>
       </div>
     </div>
+
+    ${cartaoBuffett(a)}
 
     <div class="duas-col">
       <div class="cartao">
@@ -255,13 +298,174 @@ function renderDetalhe() {
     b.addEventListener("click", () => irParaPrompt(b.dataset.prompt, a)));
 }
 
+
+/* ================= CRIVO BUFFETT ================= */
+function renderBuffettIntro() {
+  const alvo = el("buffettIntro");
+  if (!alvo || alvo.dataset.pronto) return;
+  alvo.dataset.pronto = "1";
+  alvo.innerHTML = `
+    <div class="aviso-box">
+      <strong>O crivo:</strong> os quatro filtros de Munger — entender o negócio, vantagem competitiva duradoura,
+      gente decente no comando e preço sensato — traduzidos em 12 testes objetivos. O valor intrínseco sai do
+      <em>lucro do proprietário</em> (carta de 1986: lucro contábil mais itens não-caixa, menos o capex necessário para
+      manter a posição competitiva), descontado pelo juro do título longo do governo do país da empresa mais um prêmio.
+      Cada linha mostra o número e o limite exigido — nada de nota sem explicação.
+      <br><br>Poucas empresas passam. É o esperado: Buffett rejeita quase tudo, e um crivo que aprova metade da bolsa não é um crivo.
+    </div>`;
+}
+
+function filtrarBuffett() {
+  const regiao = el("bRegiao").value, selo = el("bSelo").value;
+  const moat = +el("bMoat").value, minTenets = +el("bTenets").value;
+  const minMargem = +el("bMargem").value, soCirculo = el("bCirculo").checked;
+
+  return estado.analisadas.filter((a) => {
+    const b = a.buff;
+    if (regiao && a.regiao !== regiao) return false;
+    if (selo && b.selo.rotulo !== selo) return false;
+    if (b.q.moatForca < moat) return false;
+    if (b.aprovados < minTenets) return false;
+    if (minMargem > -100 && (b.margemSeg == null || b.margemSeg < minMargem)) return false;
+    if (soCirculo && b.foraDoCirculo) return false;
+    return true;
+  });
+}
+
+function ordenarBuffett(lista) {
+  const { campo, desc } = estado.ordemB;
+  const chave = {
+    ticker: (a) => a.ticker, regiao: (a) => a.regiao, moat: (a) => a.buff.q.moatForca,
+    tenets: (a) => a.buff.aprovados + a.buff.score / 1000, roic: (a) => a.buff.q.roic,
+    oe: (a) => a.buff.oeYield, juro: (a) => a.buff.juroLongo, k: (a) => a.buff.custoCapital,
+    intr: (a) => a.buff.intrinseco ?? -1, margem: (a) => a.buff.margemSeg ?? -999,
+    compra: (a) => a.buff.precoBuffett ?? -1
+  }[campo] || ((a) => a.buff.aprovados);
+
+  return lista.slice().sort((x, y) => {
+    const vx = chave(x), vy = chave(y);
+    const cmp = typeof vx === "string" ? vx.localeCompare(vy) : vx - vy;
+    return desc ? -cmp : cmp;
+  });
+}
+
+function renderBuffett() {
+  renderBuffettIntro();
+  const lista = ordenarBuffett(filtrarBuffett());
+  el("vazioBuffett").hidden = lista.length > 0;
+
+  el("corpoBuffett").innerHTML = lista.map((a) => {
+    const b = a.buff;
+    return `<tr>
+      <td><div class="tk">${a.ticker}${b.foraDoCirculo ? ' <span class="moeda-tag" title="fora do seu círculo de competência">fora do círculo</span>' : ""}</div>
+          <div class="nm">${a.nome}</div></td>
+      <td class="nm">${a.regiao}</td>
+      <td><div>${b.moatRotulo}</div>${b.moatTipos.map((m) => `<span class="moat-chip">${m}</span>`).join("")}</td>
+      <td class="n"><span class="score-bola ${classeTenets(b.aprovados)}">${b.aprovados}/12</span></td>
+      <td class="n">${pct(b.q.roic, 0)}</td>
+      <td class="n">${pct(b.oeYield)}</td>
+      <td class="n">${pct(b.juroLongo)}</td>
+      <td class="n">${pct(b.custoCapital)}</td>
+      <td class="n">${money(b.intrinseco, a.moeda)}</td>
+      <td class="n ${sinal(b.margemSeg)}">${b.margemSeg == null ? "—" : pct(b.margemSeg, 0)}</td>
+      <td class="n">${money(b.precoBuffett, a.moeda)}</td>
+      <td><span class="pill ${b.selo.classe}">${b.selo.rotulo}</span></td>
+      <td><button class="btn-mini" data-abrirb="${a.ticker}">ver</button></td>
+    </tr>`;
+  }).join("");
+
+  el("corpoBuffett").querySelectorAll("[data-abrirb]").forEach((btn) =>
+    btn.addEventListener("click", () => abrirAnalise(btn.dataset.abrirb)));
+}
+
+/* bloco do checklist usado dentro da aba Análise */
+function cartaoBuffett(a) {
+  const b = a.buff;
+  const grupos = ["Negócio", "Gestão", "Financeiro", "Valor"];
+  const marca = (t) => (t.ok ? ["ok-sim", "✓"] : t.nota >= 60 ? ["ok-quase", "~"] : ["ok-nao", "✗"]);
+
+  const checklist = grupos.map((g) => `
+    <div class="tenet-grupo">
+      <h4>${g}</h4>
+      ${b.tenets.filter((t) => t.grupo === g).map((t) => {
+        const [cls, ic] = marca(t);
+        return `<div class="tenet">
+          <span class="marca-ok ${cls}">${ic}</span>
+          <span><span class="nome">${t.nome}</span><div class="detalhe">${t.detalhe}</div></span>
+        </div>`;
+      }).join("")}
+    </div>`).join("");
+
+  const d = b.dolar;
+
+  // as duas lentes podem discordar — e a divergência costuma ser a informação mais útil
+  const valorDiz = a.classe.classe;
+  const qualidadeOk = b.aprovados >= 10;
+  const divergencia =
+    qualidadeOk && (valorDiz === "ruim" || valorDiz === "caro")
+      ? `<b>As duas lentes discordam.</b> Pelo crivo de qualidade a empresa passa (${b.aprovados}/12), mas os métodos de
+         valor clássicos — Graham, Bazin e múltiplo do setor — a consideram cara. É o retrato de um negócio excelente
+         negociando a múltiplo alto: Buffett pagaria por qualidade, Graham não pagaria por preço. Saiba qual escola você
+         está seguindo antes de clicar em comprar.`
+      : !qualidadeOk && (valorDiz === "otimo" || valorDiz === "bom")
+      ? `<b>As duas lentes discordam.</b> A ação está estatisticamente barata, mas reprova em ${12 - b.aprovados} dos 12
+         tenets de qualidade. Esse é o perfil clássico da armadilha de valor: barata porque o negócio piorou, não porque
+         o mercado se distraiu. Antes de comprar, encontre o motivo do desconto.`
+      : null;
+
+  return `
+    <div class="cartao">
+      <div class="linha-topo" style="justify-content:space-between;margin-bottom:10px">
+        <h2 style="margin:0">Crivo Buffett–Munger</h2>
+        <span class="pill ${b.selo.classe}" style="font-size:.9rem;padding:6px 14px">${b.selo.rotulo} · ${b.aprovados}/12</span>
+      </div>
+      ${b.foraDoCirculo ? `<div class="aviso-circulo">Este setor está fora do círculo de competência que você marcou na aba Config.
+        Munger diria para pular: a nota alta não substitui entender o negócio.</div>` : ""}
+      <div class="grade">
+        <div class="mini"><div class="rot">Lucro do proprietário</div><div class="val">${money(b.oe, a.moeda)}</div>
+          <div class="obs">por ação, após capex de manutenção</div></div>
+        <div class="mini"><div class="rot">Rende sobre o preço</div><div class="val">${pct(b.oeYield)}</div>
+          <div class="obs">título longo local: ${pct(b.juroLongo)}</div></div>
+        <div class="mini"><div class="rot">Custo de capital</div><div class="val">${pct(b.custoCapital)}</div>
+          <div class="obs">juro local + prêmio, com piso de ${estado.premissasB.taxaMinima}%</div></div>
+        <div class="mini"><div class="rot">Valor intrínseco</div><div class="val">${money(b.intrinseco, a.moeda)}</div>
+          <div class="obs">lucro do dono descontado em 10 anos</div></div>
+        <div class="mini"><div class="rot">Margem de segurança</div><div class="val ${sinal(b.margemSeg)}">${b.margemSeg == null ? "—" : pct(b.margemSeg, 0)}</div>
+          <div class="obs">exigido: ${estado.premissasB.margemBuffett}%</div></div>
+        <div class="mini"><div class="rot">Comprar até</div><div class="val" style="color:var(--verde)">${money(b.precoBuffett, a.moeda)}</div>
+          <div class="obs">valor intrínseco com desconto</div></div>
+      </div>
+      ${divergencia ? `<p class="aviso-circulo" style="margin-top:14px">${divergencia}</p>` : ""}
+      ${d && d.razao != null ? `<p class="ajuda" style="margin-top:14px"><b>Teste do dólar (carta de 1983):</b>
+        a empresa reteve ${money(d.retidos, a.moeda)} por ação em 5 anos e o preço ${d.criado >= 0 ? "subiu" : "caiu"}
+        ${money(Math.abs(d.criado), a.moeda)} no período — ${d.razao.toFixed(2)} de valor para cada 1 retido.
+        ${d.passou ? "Passou: a diretoria reinveste melhor do que você conseguiria sozinho." : "Não passou: esse lucro talvez rendesse mais no seu bolso, como dividendo."}</p>` : ""}
+    </div>
+
+    <div class="duas-col">
+      <div class="cartao">
+        <h2>Os 12 tenets</h2>
+        <div class="tenets">${checklist}</div>
+      </div>
+      <div class="cartao">
+        <h2>Inversão: o que mataria esta tese</h2>
+        <p class="ajuda">Munger inverte o problema: em vez de listar por que dá certo, listar o que faria dar errado.</p>
+        ${b.inversao.length ? `<ul class="lista-diag fraco">${b.inversao.map((x) => `<li>${x}</li>`).join("")}</ul>`
+          : `<p class="ajuda">Nenhum risco estrutural saltou dos números — o que não significa que não exista.</p>`}
+        <p class="ajuda" style="margin-top:12px">Fosso: <b>${b.moatRotulo}</b>.
+          ${b.moatTipos.length ? b.moatTipos.map((m) => `<span class="moat-chip">${m}</span>`).join("") : "Nenhuma fonte de vantagem identificada."}</p>
+      </div>
+    </div>`;
+}
+
 /* ================= CARTEIRA ================= */
 function renderCarteira() {
   const linhas = estado.carteira.map((p) => {
     const a = estado.analisadas.find((x) => x.ticker === p.ticker);
     if (!a) return null;
-    const investido = p.qtd * p.precoMedio;
-    const atual = p.qtd * a.preco;
+    // valores convertidos para a moeda base; preços seguem na moeda do ativo
+    const investido = paraBase(p.qtd * p.precoMedio, a.moeda);
+    const atual = paraBase(p.qtd * a.preco, a.moeda);
     return { ...p, a, investido, atual, resultado: atual - investido };
   }).filter(Boolean);
 
@@ -272,13 +476,13 @@ function renderCarteira() {
     const peso = totalAtual ? (l.atual / totalAtual) * 100 : 0;
     const varPct = l.investido ? (l.resultado / l.investido) * 100 : 0;
     return `<tr>
-      <td><div class="tk">${l.ticker}</div><div class="nm">${l.a.setor}</div></td>
+      <td><div class="tk">${l.ticker}<span class="moeda-tag">${l.a.regiao}</span></div><div class="nm">${l.a.setor}</div></td>
       <td class="n">${l.qtd}</td>
       <td class="n">${money(l.precoMedio, l.a.moeda)}</td>
       <td class="n">${money(l.a.preco, l.a.moeda)}</td>
-      <td class="n">${money(l.investido, l.a.moeda)}</td>
-      <td class="n">${money(l.atual, l.a.moeda)}</td>
-      <td class="n ${sinal(l.resultado)}">${money(l.resultado, l.a.moeda)} (${pct(varPct, 1)})</td>
+      <td class="n">${money(l.investido, simboloBase())}</td>
+      <td class="n">${money(l.atual, simboloBase())}</td>
+      <td class="n ${sinal(l.resultado)}">${money(l.resultado, simboloBase())} (${pct(varPct, 1)})</td>
       <td class="n">${pct(peso, 1)}</td>
       <td class="n"><span class="score-bola ${classeScore(l.a.score)}">${l.a.score.toFixed(0)}</span></td>
       <td class="n ${sinal(l.a.val.upside)}">${pct(l.a.val.upside, 0)}</td>
@@ -302,15 +506,19 @@ function renderCarteira() {
   const betaMedio = linhas.reduce((s, l) => s + l.a.beta * l.atual, 0) / totalAtual;
 
   el("carteiraResumo").innerHTML = `<div class="resumo">
-    <div class="kpi"><div class="rot">Investido</div><div class="val">${money(totalInvestido)}</div></div>
-    <div class="kpi"><div class="rot">Valor hoje</div><div class="val">${money(totalAtual)}</div></div>
-    <div class="kpi"><div class="rot">Resultado</div><div class="val ${sinal(resultado)}">${money(resultado)}</div>
+    <div class="kpi"><div class="rot">Investido</div><div class="val">${money(totalInvestido, simboloBase())}</div>
+      <div class="obs">convertido para ${estado.moedaBase}</div></div>
+    <div class="kpi"><div class="rot">Valor hoje</div><div class="val">${money(totalAtual, simboloBase())}</div></div>
+    <div class="kpi"><div class="rot">Resultado</div><div class="val ${sinal(resultado)}">${money(resultado, simboloBase())}</div>
       <div class="obs">${pct(totalInvestido ? (resultado / totalInvestido) * 100 : 0)}</div></div>
     <div class="kpi"><div class="rot">Score médio</div><div class="val">${scoreMedio.toFixed(0)}</div>
       <div class="obs">ponderado pelo valor</div></div>
     <div class="kpi"><div class="rot">Upside médio</div><div class="val ${sinal(upsideMedio)}">${pct(upsideMedio, 0)}</div></div>
+    <div class="kpi"><div class="rot">Aprovados no crivo Buffett</div>
+      <div class="val">${linhas.filter((l) => l.a.buff.aprovados >= 10).length}/${linhas.length}</div>
+      <div class="obs">com 10 ou mais dos 12 tenets</div></div>
     <div class="kpi"><div class="rot">Yield da carteira</div><div class="val">${pct(dyMedio)}</div>
-      <div class="obs">renda anual estimada: ${money(totalAtual * dyMedio / 100)}</div></div>
+      <div class="obs">renda anual estimada: ${money(totalAtual * dyMedio / 100, simboloBase())}</div></div>
   </div>`;
 
   // concentração por setor + alertas de risco
@@ -327,6 +535,17 @@ function renderCarteira() {
     if (peso > 25) alertas.push(`${l.ticker} representa ${fmt(peso, 0)}% da carteira — risco individual alto para um único papel.`);
     if (l.a.divEbitda > 3) alertas.push(`${l.ticker} tem dívida líquida de ${fmt(l.a.divEbitda, 1)}x EBITDA — sensível a juros altos.`);
     if (l.a.classe.classe === "ruim") alertas.push(`${l.ticker} está classificada como "${l.a.classe.rotulo}" pelo modelo — vale revisar a tese.`);
+  });
+  const porRegiao = {};
+  linhas.forEach((l) => { porRegiao[l.a.regiao] = (porRegiao[l.a.regiao] || 0) + l.atual; });
+  Object.entries(porRegiao).forEach(([r, v]) => {
+    const peso = (v / totalAtual) * 100;
+    if (peso > 70 && Object.keys(porRegiao).length > 0)
+      alertas.push(`${fmt(peso, 0)}% da carteira está em ${r} — concentração de país significa risco de moeda, juro e política em um só lugar.`);
+  });
+  linhas.forEach((l) => {
+    if (l.a.buff.foraDoCirculo)
+      alertas.push(`${l.ticker} está fora do círculo de competência que você marcou.`);
   });
   if (betaMedio > 1.15) alertas.push(`Beta médio de ${fmt(betaMedio, 2)} — a carteira cai mais que o índice nas quedas.`);
   if (linhas.length < 5) alertas.push(`Apenas ${linhas.length} ativo(s) — diversificação insuficiente para diluir risco específico.`);
@@ -463,6 +682,59 @@ const GLOSSARIO = [
 function renderAprender() {
   el("aprenderConteudo").innerHTML = `
     <div class="cartao">
+      <h2>O sistema de Warren Buffett e Charlie Munger, aplicado aqui</h2>
+      <p class="ajuda">Buffett e Munger nunca publicaram um algoritmo. O que existe são as cartas anuais da Berkshire,
+        as falas nas assembleias e os livros que sistematizaram tudo isso. O crivo desta aba nasce daí:</p>
+      <ol class="passos">
+        <li><b>Os quatro filtros de Munger</b> — um negócio que entendemos, com vantagem competitiva duradoura,
+          conduzido por gente capaz e honesta, a um preço sensato. Nesta ordem: preço é o último filtro, não o primeiro.</li>
+        <li><b>Lucro do proprietário</b> (carta de 1986) — lucro contábil, mais depreciação e outros itens não-caixa,
+          menos o capex necessário para manter a posição competitiva. Buffett avisou na mesma carta que esse número
+          nunca é exato, porque o capex de manutenção é estimado. Aqui ele aparece como um fator explícito e editável
+          por empresa, em vez de escondido dentro da conta.</li>
+        <li><b>Teste do dólar</b> (carta de 1983) — cada R$ 1 retido pela empresa precisa virar pelo menos R$ 1 de valor
+          de mercado para o sócio. É a forma mais direta de avaliar quem aloca o capital.</li>
+        <li><b>Desconto pelo juro do título longo</b> — Buffett não usa CAPM nem WACC acadêmico: desconta pelo juro do
+          governo mais um prêmio. Nós acrescentamos um prêmio de risco-país e um piso na taxa, para que juro nominal
+          baixo não transforme qualquer empresa em barganha.</li>
+        <li><b>Margem de segurança</b> (Graham) — o valor intrínseco é uma estimativa com premissas que podem estar
+          erradas. O desconto exigido é o colchão para esse erro.</li>
+        <li><b>Fosso econômico</b> — marca e intangíveis, vantagem de custo, efeito de rede, custo de troca, escala
+          eficiente e licença/regulação. Um fosso largo é o que permite manter retorno sobre capital acima do custo de
+          capital por muitos anos.</li>
+        <li><b>Círculo de competência e inversão</b> — Munger só investe no que entende e sempre pergunta o que faria a
+          tese morrer. Marque seus setores na aba Config e o app passa a avisar; a lista de inversão sai automática dos números.</li>
+      </ol>
+
+      <h3 style="margin-top:18px">Onde este app tenta ir além do checklist tradicional</h3>
+      <p class="ajuda">Nenhum software reproduz o julgamento de quem construiu a Berkshire — e desconfie de quem prometer
+        isso. O que dá para fazer melhor do que um checklist comum:</p>
+      <ul class="lista-diag forte">
+        <li>Cada tenet mostra o número apurado <em>e</em> o limite exigido. Você discorda? Muda a premissa e vê o efeito na hora.</li>
+        <li>O mesmo crivo roda em ${estado.dados.length} empresas de várias regiões ao mesmo tempo, com o juro local de
+          cada país — comparar uma ação brasileira com uma japonesa pelo mesmo desconto seria um erro grosseiro.</li>
+        <li>Três lentes convivem: a de Buffett (qualidade e fosso), a de Graham e Bazin (preço e dividendo) e a do fluxo
+          de caixa descontado. Quando elas discordam, isso aparece em vez de virar uma nota única.</li>
+        <li>A inversão de Munger vira lista concreta de riscos, e não uma frase motivacional.</li>
+        <li>O modelo diz onde ele mesmo falha: empresa de crescimento acelerado, upside grande demais, setor cíclico no
+          pico do ciclo, negócio complexo demais para acompanhar.</li>
+      </ul>
+
+      <h3 style="margin-top:18px">Fontes</h3>
+      <ul class="fonte-lista">
+        <li><a href="https://www.berkshirehathaway.com/letters/letters.html" target="_blank" rel="noopener">Cartas anuais da Berkshire Hathaway</a> — lucro do proprietário (1986) e teste do dólar (1983)</li>
+        <li><a href="https://en.wikipedia.org/wiki/Owner_earnings" target="_blank" rel="noopener">Owner earnings</a> — definição e limitações do conceito</li>
+        <li><a href="https://www.gurufocus.com/news/158161/charlie-mungers-four-filters-of-investing" target="_blank" rel="noopener">Os quatro filtros de Charlie Munger</a></li>
+        <li><a href="https://www.morningstar.com/investing-terms/economic-moat" target="_blank" rel="noopener">Morningstar — os cinco tipos de fosso econômico</a> e ROIC acima do custo de capital</li>
+        <li><a href="https://www.wiley.com/en-us/The+Warren+Buffett+Way,+30th+Anniversary+Edition-p-9781394239849" target="_blank" rel="noopener">Robert Hagstrom, <em>The Warren Buffett Way</em></a> — agrupamento dos tenets em negócio, gestão, financeiro e valor</li>
+        <li><a href="https://blog.validea.com/quantifying-warren-buffett/" target="_blank" rel="noopener">Critérios quantitativos de <em>Buffettology</em></a> — ROE acima de 15%, dívida quitável em menos de 5 anos, consistência do lucro</li>
+      </ul>
+      <p class="ajuda" style="margin-top:12px"><b>Honestidade sobre o limite:</b> este app organiza e checa números.
+        Buffett e Munger acertaram por décadas por causa de julgamento sobre pessoas, temperamento em crises e paciência
+        para ficar anos sem comprar nada. Isso não cabe em software — e é justamente a parte que mais pesa.</p>
+    </div>
+
+    <div class="cartao">
       <h2>Como este app decide o que é "barato e vai crescer"</h2>
       <p class="ajuda">Barato não é preço baixo em reais. Uma ação de R$ 2 pode ser cara e uma de R$ 200 pode ser barata.
         Barato é preço abaixo do valor que o negócio gera. O app calcula esse valor por quatro caminhos independentes
@@ -512,9 +784,31 @@ function renderAprender() {
 }
 
 /* ================= CONFIG ================= */
+function renderCirculo() {
+  const setores = [...new Set(estado.dados.map((a) => a.setor))].sort();
+  el("circulo").innerHTML = setores.map((st) => `
+    <label><input type="checkbox" data-circulo="${st}" ${estado.circulo.includes(st) ? "checked" : ""}> <span>${st}</span></label>`).join("");
+  el("circulo").querySelectorAll("[data-circulo]").forEach((c) =>
+    c.addEventListener("change", () => {
+      const st = c.dataset.circulo;
+      estado.circulo = c.checked
+        ? [...new Set([...estado.circulo, st])]
+        : estado.circulo.filter((x) => x !== st);
+      salvar(LS.circulo, estado.circulo);
+      recalcular();
+    }));
+}
+
 function renderConfig() {
   el("editorDados").value = JSON.stringify(estado.dados, null, 2);
+  el("editorParams").value = JSON.stringify(estado.params, null, 2);
   el("token").value = carregar(LS.token) || "";
+  el("moedaBase").value = estado.moedaBase;
+  const b = estado.premissasB;
+  el("pPremio").value = b.premioRisco; el("vPremio").textContent = b.premioRisco;
+  el("pPiso").value = b.taxaMinima; el("vPiso").textContent = b.taxaMinima;
+  el("pMargemBuf").value = b.margemBuffett; el("vMargemBuf").textContent = b.margemBuffett;
+  renderCirculo();
   const p = estado.premissas;
   el("pTaxa").value = p.taxaDesconto; el("vTaxa").textContent = p.taxaDesconto;
   el("pPerp").value = p.crescPerpetuo; el("vPerp").textContent = p.crescPerpetuo;
@@ -529,6 +823,7 @@ async function atualizarPrecos() {
   salvar(LS.token, token);
 
   const tickersBR = estado.dados.filter((a) => a.pais === "BR").map((a) => a.ticker);
+  if (!tickersBR.length) { st.textContent = "nenhum ativo da B3 na base"; st.className = "status erro"; return; }
   st.textContent = "buscando cotações..."; st.className = "status";
 
   try {
@@ -578,6 +873,21 @@ function salvarDados() {
   }
 }
 
+function salvarParams() {
+  const st = el("statusParams");
+  try {
+    const novo = JSON.parse(el("editorParams").value);
+    if (!novo.FX || !novo.juros) throw new Error("esperava as chaves 'FX' e 'juros'");
+    if (!(novo.FX.BRL > 0)) throw new Error("FX.BRL deve existir e ser maior que zero");
+    estado.params = novo;
+    salvar(LS.params, novo);
+    st.textContent = "parâmetros salvos ✓"; st.className = "status ok";
+    recalcular();
+  } catch (e) {
+    st.textContent = `JSON inválido: ${e.message}`; st.className = "status erro";
+  }
+}
+
 /* ================= NAVEGAÇÃO E EVENTOS ================= */
 function trocarAba(nome) {
   document.querySelectorAll(".aba").forEach((b) => b.classList.toggle("ativa", b.dataset.aba === nome));
@@ -599,6 +909,18 @@ function preencherSelects() {
   const fs = el("fSetor"), antesS = fs.value;
   fs.innerHTML = `<option value="">todos</option>` + setores.map((s) => `<option value="${s}">${s}</option>`).join("");
   fs.value = antesS;
+
+  const regioes = [...new Set(estado.analisadas.map((a) => a.regiao))].sort();
+  [["fRegiao", "todas"], ["bRegiao", "todas"]].forEach(([id, rot]) => {
+    const sel = el(id), antes = sel.value;
+    sel.innerHTML = `<option value="">${rot}</option>` + regioes.map((r) => `<option value="${r}">${r}</option>`).join("");
+    sel.value = antes;
+  });
+
+  const selos = [...new Set(estado.analisadas.map((a) => a.buff.selo.rotulo))].sort();
+  const bs = el("bSelo"), antesSelo = bs.value;
+  bs.innerHTML = `<option value="">todos</option>` + selos.map((x) => `<option value="${x}">${x}</option>`).join("");
+  bs.value = antesSelo;
 }
 
 function ligarEventos() {
@@ -606,7 +928,7 @@ function ligarEventos() {
     if (e.target.dataset.aba) trocarAba(e.target.dataset.aba);
   });
 
-  ["fBusca", "fSetor", "fPais", "fDivida", "fLucro"].forEach((id) =>
+  ["fBusca", "fSetor", "fRegiao", "fDivida", "fLucro"].forEach((id) =>
     el(id).addEventListener("input", renderTabela));
 
   const sliders = [["fScore", "vScore"], ["fUpside", "vUpside"], ["fPL", "vPL"], ["fDY", "vDY"]];
@@ -616,7 +938,7 @@ function ligarEventos() {
   }));
 
   el("limparFiltros").addEventListener("click", () => {
-    el("fBusca").value = ""; el("fSetor").value = ""; el("fPais").value = "";
+    el("fBusca").value = ""; el("fSetor").value = ""; el("fRegiao").value = "";
     el("fScore").value = 0; el("vScore").textContent = "0";
     el("fUpside").value = -80; el("vUpside").textContent = "-80";
     el("fPL").value = 40; el("vPL").textContent = "40";
@@ -680,11 +1002,41 @@ function ligarEventos() {
       recalcular();
     }));
 
+  // filtros da aba Buffett
+  ["bRegiao", "bSelo", "bMoat", "bCirculo"].forEach((id) =>
+    el(id).addEventListener("input", renderBuffett));
+  [["bTenets", "vTenets"], ["bMargem", "vMargemB"]].forEach(([id, saida]) =>
+    el(id).addEventListener("input", () => { el(saida).textContent = el(id).value; renderBuffett(); }));
+
+  document.querySelectorAll("#tabelaBuffett th[data-sortb]").forEach((th) =>
+    th.addEventListener("click", () => {
+      const campo = th.dataset.sortb;
+      estado.ordemB = { campo, desc: estado.ordemB.campo === campo ? !estado.ordemB.desc : true };
+      renderBuffett();
+    }));
+
+  // premissas do crivo Buffett
+  [["pPremio", "vPremio", "premioRisco"], ["pPiso", "vPiso", "taxaMinima"],
+   ["pMargemBuf", "vMargemBuf", "margemBuffett"]].forEach(([id, saida, chave]) =>
+    el(id).addEventListener("input", () => {
+      el(saida).textContent = el(id).value;
+      estado.premissasB[chave] = +el(id).value;
+      salvar(LS.premissasB, estado.premissasB);
+      recalcular();
+    }));
+
+  el("moedaBase").addEventListener("change", () => {
+    estado.moedaBase = el("moedaBase").value;
+    salvar(LS.moedaBase, estado.moedaBase);
+    renderCarteira();
+  });
+
+  el("btnSalvarParams").addEventListener("click", salvarParams);
   el("btnAtualizar").addEventListener("click", atualizarPrecos);
   el("btnSalvarDados").addEventListener("click", salvarDados);
   el("btnResetDados").addEventListener("click", () => {
     if (!confirm("Restaurar a base original? Suas edições de fundamentos serão perdidas (a carteira é mantida).")) return;
-    estado.dados = ACOES.map((a) => ({ ...a }));
+    estado.dados = UNIVERSO.map((a) => ({ ...a }));
     localStorage.removeItem(LS.dados);
     estado.origemPrecos = "local";
     el("badgeDados").textContent = "base local";
@@ -703,9 +1055,9 @@ function iniciar() {
   el("badgeDados").title = DATA_REF;
   ligarEventos();
   renderPrompts();
-  renderAprender();
   renderConfig();
   recalcular();
+  renderAprender();
 }
 
 document.addEventListener("DOMContentLoaded", iniciar);
