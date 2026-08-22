@@ -1,36 +1,211 @@
 <!DOCTYPE html>
-<html lang="pt">
+<html lang="pt-BR">
 <head>
-   <meta charset="UTF-8">
-   <meta http-equiv="X-UA-Compatible" content="IE=edge">
-   <meta name="viewport" content="width=diverce-width,initial-scale=1.0">
-   <title>clima</title>
-   <link rel="stylesheet" href="style.css"/>  
-   </head>
-   <body>
-   <h1>Clima<h1>
-   <form class="busca">
-     <input type="search" id="searchInput"/>
-     <button>Buscar</button>
-     </form>
-     <div class="resultado">
-       <div class="titulo">--</div>
-       
-       <div class="info">
-        <div class="temp">
-        <div class="tempTitulo">temperatura</div>
-        <div class="temInfo">--<sup>°c</sup></div>
-        <img src="http://operweathermap.org/img/wn/10d@2x.png"/>
-       </div>
-       <div class="vento">
-        <div class="ventoTitulo">Vento</div>
-        <div class="ventoInfo">--<span>Km/h</span></div>
-        <div class="ventoPonto" style="transform: rotate(0deg)"></div>
-         </div>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ações Radar — encontre ações baratas com potencial de crescimento</title>
+<meta name="description" content="App para estudar e indicar ações com preço abaixo do valor justo e motor de crescimento.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topo">
+  <div class="marca">
+    <span class="logo">📈</span>
+    <div>
+      <h1>Ações Radar</h1>
+      <p class="sub">Ações baratas hoje, com motor de crescimento para amanhã</p>
     </div>
   </div>
-</div> 
-<div class="aviso"></div>
-<footer>Criado por João Moreira</footer>
+  <div class="topo-acoes">
+    <label class="campo-inline">
+      <span>Perfil</span>
+      <select id="perfil">
+        <option value="conservador">Conservador</option>
+        <option value="moderado" selected>Moderado</option>
+        <option value="agressivo">Agressivo</option>
+      </select>
+    </label>
+    <span id="badgeDados" class="badge-dados" title="Origem dos dados">base local</span>
+  </div>
+</header>
+
+<nav class="abas" id="abas">
+  <button class="aba ativa" data-aba="radar">Radar</button>
+  <button class="aba" data-aba="analise">Análise</button>
+  <button class="aba" data-aba="carteira">Carteira</button>
+  <button class="aba" data-aba="prompts">Prompts de IA</button>
+  <button class="aba" data-aba="aprender">Aprender</button>
+  <button class="aba" data-aba="config">Config</button>
+</nav>
+
+<main>
+
+<!-- ================= RADAR ================= -->
+<section class="painel ativo" id="painel-radar">
+  <div class="resumo" id="resumo"></div>
+
+  <div class="filtros">
+    <label class="campo"><span>Buscar</span>
+      <input type="search" id="fBusca" placeholder="ticker ou empresa">
+    </label>
+    <label class="campo"><span>Setor</span>
+      <select id="fSetor"><option value="">todos</option></select>
+    </label>
+    <label class="campo"><span>País</span>
+      <select id="fPais">
+        <option value="">todos</option>
+        <option value="BR">Brasil</option>
+        <option value="US">EUA</option>
+      </select>
+    </label>
+    <label class="campo"><span>Score mínimo <b id="vScore">0</b></span>
+      <input type="range" id="fScore" min="0" max="90" value="0" step="5">
+    </label>
+    <label class="campo"><span>Upside mínimo <b id="vUpside">-80</b>%</span>
+      <input type="range" id="fUpside" min="-80" max="100" value="-80" step="5">
+    </label>
+    <label class="campo"><span>P/L máximo <b id="vPL">40</b></span>
+      <input type="range" id="fPL" min="3" max="40" value="40" step="1">
+    </label>
+    <label class="campo"><span>DY mínimo <b id="vDY">0</b>%</span>
+      <input type="range" id="fDY" min="0" max="10" value="0" step="0.5">
+    </label>
+    <label class="campo check">
+      <input type="checkbox" id="fDivida"> <span>Excluir dívida alta (&gt;3x EBITDA)</span>
+    </label>
+    <label class="campo check">
+      <input type="checkbox" id="fLucro" checked> <span>Só empresas com lucro</span>
+    </label>
+    <button class="btn-ghost" id="limparFiltros">Limpar filtros</button>
+  </div>
+
+  <div class="tabela-wrap">
+    <table class="tabela" id="tabela">
+      <thead>
+        <tr>
+          <th data-sort="ticker">Ativo</th>
+          <th data-sort="setor">Setor</th>
+          <th data-sort="preco" class="n">Preço</th>
+          <th data-sort="justo" class="n">Preço justo</th>
+          <th data-sort="upside" class="n">Upside</th>
+          <th data-sort="pl" class="n">P/L</th>
+          <th data-sort="pvp" class="n">P/VP</th>
+          <th data-sort="dy" class="n">DY</th>
+          <th data-sort="roe" class="n">ROE</th>
+          <th data-sort="cresc" class="n">Cresc. est.</th>
+          <th data-sort="score" class="n">Score</th>
+          <th>Veredito</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="corpoTabela"></tbody>
+    </table>
+    <p class="vazio" id="vazio" hidden>Nenhuma ação passou nos filtros. Afrouxe algum critério.</p>
+  </div>
+</section>
+
+<!-- ================= ANÁLISE ================= -->
+<section class="painel" id="painel-analise">
+  <div class="linha-topo">
+    <label class="campo"><span>Ação</span>
+      <select id="selAtivo"></select>
+    </label>
+    <button class="btn" id="btnAddCarteira">+ Adicionar à carteira</button>
+  </div>
+  <div id="detalhe"></div>
+</section>
+
+<!-- ================= CARTEIRA ================= -->
+<section class="painel" id="painel-carteira">
+  <form class="form-carteira" id="formCarteira">
+    <label class="campo"><span>Ativo</span><select id="cAtivo"></select></label>
+    <label class="campo"><span>Quantidade</span><input type="number" id="cQtd" min="1" step="1" value="100"></label>
+    <label class="campo"><span>Preço médio pago</span><input type="number" id="cPreco" min="0" step="0.01" placeholder="0,00"></label>
+    <button class="btn" type="submit">Adicionar</button>
+  </form>
+  <div id="carteiraResumo"></div>
+  <div class="tabela-wrap">
+    <table class="tabela" id="tabelaCarteira">
+      <thead><tr>
+        <th>Ativo</th><th class="n">Qtd</th><th class="n">Preço médio</th><th class="n">Preço atual</th>
+        <th class="n">Investido</th><th class="n">Valor hoje</th><th class="n">Resultado</th>
+        <th class="n">% carteira</th><th class="n">Score</th><th class="n">Upside</th><th></th>
+      </tr></thead>
+      <tbody id="corpoCarteira"></tbody>
+    </table>
+  </div>
+  <div id="riscoCarteira"></div>
+</section>
+
+<!-- ================= PROMPTS ================= -->
+<section class="painel" id="painel-prompts">
+  <div class="aviso-box">
+    <strong>Como usar:</strong> escolha um roteiro, preencha os campos (o app já preenche com a ação selecionada
+    no Radar quando faz sentido), clique em <em>Gerar</em> e cole o texto em qualquer IA.
+    Peça sempre que a IA cite as fontes e a data dos números — modelos de linguagem não têm cotação em tempo real.
+  </div>
+  <div class="prompts-grid" id="promptsGrid"></div>
+</section>
+
+<!-- ================= APRENDER ================= -->
+<section class="painel" id="painel-aprender">
+  <div id="aprenderConteudo"></div>
+</section>
+
+<!-- ================= CONFIG ================= -->
+<section class="painel" id="painel-config">
+  <div class="cartao">
+    <h2>Premissas do modelo</h2>
+    <p class="ajuda">Estes números mudam o preço justo calculado. Mexa com critério: quanto maior a taxa de desconto, mais conservador (e mais baixo) fica o preço justo.</p>
+    <div class="grade-config">
+      <label class="campo"><span>Taxa de desconto (% a.a.) <b id="vTaxa">13</b></span>
+        <input type="range" id="pTaxa" min="8" max="20" step="0.5" value="13"></label>
+      <label class="campo"><span>Crescimento perpétuo (% a.a.) <b id="vPerp">4</b></span>
+        <input type="range" id="pPerp" min="0" max="6" step="0.5" value="4"></label>
+      <label class="campo"><span>Yield desejado — método Bazin (%) <b id="vYield">6</b></span>
+        <input type="range" id="pYield" min="3" max="12" step="0.5" value="6"></label>
+      <label class="campo"><span>Margem de segurança exigida (%) <b id="vMargem">25</b></span>
+        <input type="range" id="pMargem" min="0" max="50" step="5" value="25"></label>
+    </div>
+  </div>
+
+  <div class="cartao">
+    <h2>Preços em tempo real (opcional)</h2>
+    <p class="ajuda">A base local traz preços de exemplo. Para puxar a cotação atual, cole um token gratuito da
+      <a href="https://brapi.dev" target="_blank" rel="noopener">brapi.dev</a> (ações da B3). O token fica salvo só no seu navegador.</p>
+    <div class="linha-topo">
+      <label class="campo"><span>Token brapi</span><input type="password" id="token" placeholder="seu token"></label>
+      <button class="btn" id="btnAtualizar">Atualizar preços</button>
+      <span id="statusApi" class="status"></span>
+    </div>
+  </div>
+
+  <div class="cartao">
+    <h2>Editar a base de dados</h2>
+    <p class="ajuda">Os fundamentos abaixo alimentam todo o app. Atualize com os números do último balanço
+      (site de RI da empresa, Status Invest, Fundamentei) e clique em salvar. Fica guardado no seu navegador.</p>
+    <textarea id="editorDados" spellcheck="false"></textarea>
+    <div class="linha-topo">
+      <button class="btn" id="btnSalvarDados">Salvar base</button>
+      <button class="btn-ghost" id="btnResetDados">Restaurar base original</button>
+      <span id="statusDados" class="status"></span>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="rodape">
+  <p><strong>Isto é uma ferramenta de estudo, não uma recomendação de investimento.</strong>
+     Os números da base são aproximados e servem de exemplo. Confira sempre no release de resultados da empresa
+     antes de qualquer decisão. Rentabilidade passada não garante rentabilidade futura.</p>
+  <p class="creditos">Criado por João Moreira · roteiros de análise baseados nos 10 prompts de @guilhermemorais.ia</p>
+</footer>
+
+<script src="js/data.js"></script>
+<script src="js/engine.js"></script>
+<script src="js/prompts.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
